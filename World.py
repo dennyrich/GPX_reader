@@ -7,46 +7,57 @@ from display import display_road, display_center_test, clear_canvas
 CANVAS_WIDTH = 800
 CANVAS_HEIGHT = 800
 
-# animation = Tk()
-# c = Canvas(animation, width = CANVAS_WIDTH, height = CANVAS_HEIGHT)
-# c.pack()
-
-# class Coord(object):
-#     def __init__(self, x, y, elev):
-#         self.x = x
-#         self.y = y
-#         self.elev = elev
-
+# 2 attributes: x coordinate and y coordinate
 class Vector2D(object):
     def __init__(self, x, y):
         self.x = x
         self.y = y
-    def change_basis(self, other_vector):
-        perpen_x = -1 * self.y
-        perpen_y = self.x
-        #matrix multiplication
-        #[x    perpen_x] [other_x] = [new_x]
-        #[y    perpen_y] [otehr_y]   [new_y]
-        new_x = self.x * other_vector.x + perpen_x * other_vector.y
-        new_y = self.y * other_vector.x + perpen_y * other_vector.y
-        return Vector2D(new_x, new_y)
+
+    def dot(self, other):
+        return self.x * other.x + self.y * other.y
+    #calculates horizontal and vertical components with respect to self
+    def projectX_and_Y(self, other_vector):
+        angle = self.angle_between(other_vector)
+        # x = other_vector.x * self.angle_between(other_vector)
+        # y = other_vector.y * self.angle_between(other_vector)
+        #perp_vector_clock_wise = Vector2D(self.y, -1*self.x)
+        x = other_vector.x * math.sin(angle)
+        y = other_vector.y * math.cos(angle)
+        return Vector2D(x, y)
+
+    def angle_between(self, other_vector):
+        dot = self.x * other_vector.x + self.y * other_vector.y
+        self_magnitude = math.sqrt(self.x ** 2 + self.y ** 2)
+        other_magnitude = math.sqrt(other_vector.x ** 2 + other_vector.y ** 2)
+        cos_angle = round(dot / (self_magnitude * other_magnitude), 6)
+        print(cos_angle)
+        return math.acos(cos_angle)
+
     def scaleX(self, factor):
         self.x *= factor
     def scaleY(self, factor, change_elev, elev_factor):
+        #negative values are higher
         self.y *= factor
         self.y += change_elev * elev_factor
+        print("the scaled vector rel is: ", self.y)
 
+    def print_vector(self):
+        print(self.x)
+        print(self.y)
 
+#attrubutes: a data_queue("list" of coordinates from gpx file)
 class World(object):
     """have queue of sides that get higher or lower
     trkseg is list of coordinates
     data points are (lat, lon, elev, time).
     """
-    curr_axis = Vector2D(1, 1)
+    #curr_axis = Vector2D(1, 1)
 
     def __init__(self, data_queue):
         self.data_queue = data_queue
-
+    """ sends queue to create points, displays the points, then removes the first
+    data point from the queue... repeat until all have been removed
+    """
     def run(self):
         prevTime = self.data_queue[0][3] #hh:mm:ss
         prevHours = int(prevTime[0:2])
@@ -55,7 +66,7 @@ class World(object):
         while len(self.data_queue) > 1:
             road_points = self.create_points()
             self.create_points()
-            del self.data_queue[0] #removes first position thing
+            del self.data_queue[0] #removes first position (as if passing that position)
             time = self.data_queue[0][3]
 
             changeHours = int(time[0:2]) - prevHours
@@ -85,14 +96,14 @@ class World(object):
 
     def create_points(self):
         elev_factor = 30
-        distance_factor = 50000 #or change in lat/lon
+        distance_factor = 500000 #or change in lat/lon
         distance_factorX = 50000
 
-        """insures position is on screne. pos is an array of length 2: [x, y]
+        """insures position is on screen. pos is an array of length 2: [x, y]
         """
         def update_pos(curr_pos, vector):
             curr_pos[0] += vector.x
-            curr_pos[1] += vector.y
+            curr_pos[1] -= vector.y #since "up" is the negative direction in the canvas
 
         def validate_pos(pos):
             return pos[0] >= 0 and pos[0] <= CANVAS_WIDTH and pos[1] >= 0 and pos[1] <= CANVAS_HEIGHT
@@ -107,20 +118,6 @@ class World(object):
 
         """insures lines of polygon do not cross, forming a bad figure
         """
-        def is_good_coord(x, y, curr_pos, prev_pos, last_pos_in_arr):
-            #pos is higher but side extends lower than previous side
-            if (curr_pos[1] > prev_pos[1] and y < last_pos_in_arr[1]):
-                return False
-            #opposite of above
-            if (curr_pos[1] < prev_pos[1] and y > last_pos_in_arr[1]):
-                return False
-            #if pos is to the right of previous but its side extends to the left of previous side
-            if (curr_pos[0] > prev_pos[0] and y < last_pos_in_arr[0]):
-                return False
-            #opposite of above
-            if (curr_pos[0] < prev_pos[0] and y > last_pos_in_arr[0]):
-                return False
-            return True
 
         def plot_points_test(arr):
             for i in range(0, len(arr) - 1, 2):
@@ -140,31 +137,37 @@ class World(object):
         second_x = self.data_queue[1][0]
         second_y = self.data_queue[1][1]
 
-        curr_vector = Vector2D(second_x - first_x, second_y - first_y)
+        curr_direction = Vector2D(second_x - first_x, second_y - first_y)
+        curr_direction.scaleX(distance_factorX)
+        curr_direction.scaleY(distance_factor, 0, elev_factor)
 
-
-        prevX_abs = self.data_queue[0][0]
-        prevY_abs = self.data_queue[0][1]
+        prevX_abs = first_x
+        prevY_abs = first_y
         prev_elev = self.data_queue[0][2]
 
+        #initialize the array
         positions_left = [bottom_leftX, bottom_leftY]
         positions_right = [bottom_rightX, bottom_rightY]
         line_array = [[CANVAS_WIDTH / 2, bottom_leftY]] #road without width
 
         for data in self.data_queue[1:]:
             #calculate absolute distance in x and y components
-            changeX_abs = data[0] - prevX_abs
+            changeX_abs = data[0] - prevX_abs #abs means absolute; not scaled
             changeY_abs = data[1] - prevY_abs
             elev = data[2]
-            change_elev = elev - prev_elev
-            vector_abs = Vector2D(changeX_abs, changeY_abs)
-            vector_rel = curr_vector.change_basis(vector_abs)
-            vector_rel.scaleX(distance_factorX)
-            vector_rel.scaleY(distance_factor, change_elev, elev_factor)
-            step_len = math.sqrt(changeX_abs**2 + changeY_abs**2)
+            change_elev = elev - prev_elev #in absolute terms
+            vector_abs = Vector2D(changeX_abs, changeY_abs) #vector in terms of standard basis, not scaled
+            vector_abs.scaleX(distance_factorX)
+            vector_abs.scaleY(distance_factor, change_elev, elev_factor) #factor, change_elev, elev_factor
 
-            curr_vector = vector_rel
-            prev_elev = elev
+            print("vector abs is ", vector_abs.x, vector_abs.y)
+
+            vector_rel = curr_direction.projectX_and_Y(vector_abs)
+            print("vector rel is ", vector_rel.x, vector_rel.y)
+            #scale it to world of canvas
+
+            #step_len = math.sqrt(changeX_abs**2 + changeY_abs**2)
+
 
             update_pos(curr_pos, vector_rel)
 
@@ -202,7 +205,7 @@ class World(object):
 
         poses = positions_left + positions_right
         #plot_points_test(poses)
-        print(line_array)
+        #print(line_array)
         display_center_test(line_array)
 
     def testing(self):
