@@ -2,7 +2,10 @@ from time import sleep
 import math
 from tkinter import *
 import queue
-from display import display_road, display_center_test, clear_canvas
+from display import display_road, display_center_test, clear_canvas, draw_person
+from scipy.interpolate import spline
+import matplotlib.pyplot as plt
+import numpy as np 
 
 CANVAS_WIDTH = 800
 CANVAS_HEIGHT = 800
@@ -21,8 +24,9 @@ class Vector2D(object):
         # x = other_vector.x * self.angle_between(other_vector)
         # y = other_vector.y * self.angle_between(other_vector)
         #perp_vector_clock_wise = Vector2D(self.y, -1*self.x)
-        x = other_vector.x * math.sin(angle)
-        y = other_vector.y * math.cos(angle)
+
+        x = other_vector.magnitude() * math.sin(angle * 1.2) 
+        y = other_vector.magnitude() * math.cos(angle * 1.2)
         return Vector2D(x, y)
 
     def angle_between(self, other_vector):
@@ -30,20 +34,28 @@ class Vector2D(object):
         self_magnitude = math.sqrt(self.x ** 2 + self.y ** 2)
         other_magnitude = math.sqrt(other_vector.x ** 2 + other_vector.y ** 2)
         cos_angle = round(dot / (self_magnitude * other_magnitude), 6)
-        print(cos_angle)
+        print("cos angle", cos_angle)
         return math.acos(cos_angle)
 
-    def scaleX(self, factor):
+    def scale(self, factor):
         self.x *= factor
-    def scaleY(self, factor, change_elev, elev_factor):
-        #negative values are higher
-        self.y *= factor
-        self.y += change_elev * elev_factor
-        print("the scaled vector rel is: ", self.y)
+        self.y *= factor 
+
+    def magnitude(self):
+        return math.sqrt(self.x**2 + self.y**2)    
 
     def print_vector(self):
-        print(self.x)
-        print(self.y)
+        print("the vector is: <", self.x, self.y, ">")
+
+class Runner(object):
+    def __init__(self):
+        self.state = 0
+
+    def draw(self):
+        draw_person(self.state)
+
+
+
 
 #attrubutes: a data_queue("list" of coordinates from gpx file)
 class World(object):
@@ -64,8 +76,10 @@ class World(object):
         prevMins = int(prevTime[3:5])
         prevSecs = int(prevTime[6:])
         while len(self.data_queue) > 1:
+            #clear_canvas()
+            print(len(self.data_queue), " +++++++++++++++++++++++++++ ")
             road_points = self.create_points()
-            self.create_points()
+            #self.interpolate(road_points)
             del self.data_queue[0] #removes first position (as if passing that position)
             time = self.data_queue[0][3]
 
@@ -77,8 +91,14 @@ class World(object):
             prevHours = int(time[0:2])
             prevMins = int(time[3:5])
             prevSecs = int(time[6:])
+
             clear_canvas()
-            #time.sleep(0.1)
+            display_road(road_points)
+            sleep(.1)
+            
+
+            #sleep(0.01)
+            
 
     """keeps track of angle with respect to x axis.
     also keeps track of elevation and zoom factor increases
@@ -93,28 +113,63 @@ class World(object):
         speed_coord_per_sec = dist / delta_t
         c.create_rectangle(10, 10, 200, 200, fill = "yellow")
         c.create_text(100, 100, text = str(speed))
+    """***************************************************************************
+    """
+
+    def interpolate(self, points):
+        # def transpose(p):
+        #     points = p[:]
+        #     for i in range(0, len(points) - 1, 2):
+        #         temp = points[i]
+        #         points[i] = points[i + 1]
+        #         points[i + 1] = temp
+        #     return points 
+
+        degree = len(points) - 1
+        # transposed = transpose(points)
+        xk = [p[0] for p in points]
+        print(xk)
+        yk = [p[1] for p in points]
+        print(yk)
+        plt.plot(xk, yk)
+        plt.show()
+        xnew = [i for i in range(0, 800, 10)] #0 to 800, increment by 10
+        ynew = spline(yk, xk, xnew, order=degree)
+
+        xnew, ynew = ynew, xnew #switch the coordinates back
+
+        plt.plot(xnew, ynew)
+        plt.show()
+        sleep(5)
+
+
 
     def create_points(self):
-        elev_factor = 30
-        distance_factor = 500000 #or change in lat/lon
-        distance_factorX = 50000
+        elev_factor = 1
+        distance_factor = 1000000 #or change in lat/lon
+
 
         """insures position is on screen. pos is an array of length 2: [x, y]
         """
-        def update_pos(curr_pos, vector):
-            curr_pos[0] += vector.x
-            curr_pos[1] -= vector.y #since "up" is the negative direction in the canvas
+        def update_pos(curr_pos, vector, change_elev):
+            new_pos = curr_pos[:] #make a copy
+            new_pos[0] += vector.x
+            new_pos[1] -= (vector.y + change_elev * elev_factor) #since "up" is the negative direction in the canvas
+            return new_pos
 
         def validate_pos(pos):
             return pos[0] >= 0 and pos[0] <= CANVAS_WIDTH and pos[1] >= 0 and pos[1] <= CANVAS_HEIGHT
 
         def calc_width(distance_from_start):
             #print("width: ", 400 - ((distance_from_start ** 2) * 0.0005))
-            return 800 - (distance_from_start * 0.7)
+            return 800 - (distance_from_start * 0.9)
 
         def calc_distance(pos):
             #print(math.sqrt((pos[0] - 400) ** 2 + pos[1] ** 2))
             return math.sqrt((pos[0] - 400) ** 2 + (CANVAS_HEIGHT - pos[1]) ** 2)
+
+        def get_distance_factor(rep):
+            return 6000000 - rep * 25000
 
         """insures lines of polygon do not cross, forming a bad figure
         """
@@ -127,19 +182,20 @@ class World(object):
                 c.update()
             sleep(.1)
 
+        #starting points on canvas
         curr_pos = [CANVAS_WIDTH / 2, CANVAS_HEIGHT] #starts at bottom center
         distance_from_start = 0
         bottom_leftX, bottom_rightX = 400 - calc_width(0)/2, 400 + calc_width(0)/2
         bottom_leftY, bottom_rightY = CANVAS_HEIGHT, CANVAS_HEIGHT
 
+        #before going in loop, need to calculate current vector
         first_x = self.data_queue[0][0]
         first_y = self.data_queue[0][1]
         second_x = self.data_queue[1][0]
         second_y = self.data_queue[1][1]
 
         curr_direction = Vector2D(second_x - first_x, second_y - first_y)
-        curr_direction.scaleX(distance_factorX)
-        curr_direction.scaleY(distance_factor, 0, elev_factor)
+        curr_direction.scale(distance_factor)
 
         prevX_abs = first_x
         prevY_abs = first_y
@@ -150,6 +206,8 @@ class World(object):
         positions_right = [bottom_rightX, bottom_rightY]
         line_array = [[CANVAS_WIDTH / 2, bottom_leftY]] #road without width
 
+        rep = 0 #used for calculating distance factor
+
         for data in self.data_queue[1:]:
             #calculate absolute distance in x and y components
             changeX_abs = data[0] - prevX_abs #abs means absolute; not scaled
@@ -157,24 +215,25 @@ class World(object):
             elev = data[2]
             change_elev = elev - prev_elev #in absolute terms
             vector_abs = Vector2D(changeX_abs, changeY_abs) #vector in terms of standard basis, not scaled
-            vector_abs.scaleX(distance_factorX)
-            vector_abs.scaleY(distance_factor, change_elev, elev_factor) #factor, change_elev, elev_factor
-
-            print("vector abs is ", vector_abs.x, vector_abs.y)
-
-            vector_rel = curr_direction.projectX_and_Y(vector_abs)
-            print("vector rel is ", vector_rel.x, vector_rel.y)
+            distance_factor = get_distance_factor(rep)
+            rep += 1
+            vector_abs.scale(distance_factor)
+    
+            vector_abs.print_vector()
+            vector_rel = vector_abs.projectX_and_Y(curr_direction)
+            vector_rel.print_vector()
             #scale it to world of canvas
 
             #step_len = math.sqrt(changeX_abs**2 + changeY_abs**2)
 
 
-            update_pos(curr_pos, vector_rel)
+            curr_pos = update_pos(curr_pos, vector_rel, change_elev)
 
             #for testing without width:
             line_array.append(curr_pos)
 
             #gives the road width
+            #****** need to uncomment when ready
             distance_from_start = calc_distance(curr_pos)
             l_width = calc_width(distance_from_start)
 
@@ -204,9 +263,14 @@ class World(object):
 
 
         poses = positions_left + positions_right
-        #plot_points_test(poses)
-        #print(line_array)
+        print(line_array, "-------")
         display_center_test(line_array)
+        #return line_array
+        return poses 
+
+
+        
+        print("********")
 
     def testing(self):
         return

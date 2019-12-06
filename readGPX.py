@@ -4,7 +4,7 @@ from World import World
 
 
 drawingFactor = 0.1
-file = "Circle_run.gpx"
+file = "circle_run_five_speed.gpx"
 fileName = "../../../Downloads/" + file
 tree = ET.parse(fileName)
 root = tree.getroot()
